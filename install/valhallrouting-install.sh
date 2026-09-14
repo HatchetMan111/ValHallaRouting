@@ -9,6 +9,40 @@
 #   - Aufruf im LAN: http://<LXC-IP>/  (sofort nutzbar: Route, Isochrone, Matrix)
 
 source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
+# Fallback, falls das Script manuell (ohne build_container) in einem
+# bestehenden Debian-LXC / einer VM als root ausgeführt wird:
+if ! command -v setting_up_container >/dev/null 2>&1; then
+  STD=""
+  TAB="  "
+  GN="\e[1;92m"
+  CL="\e[0m"
+  msg_info() { echo -e "${TAB}$1..."; }
+  msg_ok() { echo -e "${TAB}\e[1;92mOK\e[0m $1"; }
+  msg_warn() { echo -e "${TAB}\e[1;93mWARN\e[0m $1"; }
+  msg_error() { echo -e "${TAB}\e[1;91mFEHLER\e[0m $1"; }
+  setting_up_container() { :; }
+  network_check() { :; }
+  update_os() { apt-get update && apt-get -y upgrade; }
+  setup_docker() {
+    if ! command -v docker >/dev/null 2>&1; then
+      apt-get install -y ca-certificates curl gnupg
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+      chmod a+r /etc/apt/keyrings/docker.asc
+      # shellcheck disable=SC1091
+      . /etc/os-release
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian ${VERSION_CODENAME} stable" >/etc/apt/sources.list.d/docker.list
+      apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    fi
+    systemctl enable --now docker 2>/dev/null || service docker start 2>/dev/null || true
+  }
+  motd_ssh() { :; }
+  customize() { :; }
+  cleanup_lxc() { apt-get -y autoremove && apt-get -y autoclean; }
+  verb_ip6() { :; }
+  color() { :; }
+  catch_errors() { set -Eeuo pipefail; }
+fi
 color
 verb_ip6
 catch_errors
@@ -17,6 +51,9 @@ network_check
 update_os
 
 # ---------- 1. Region -> PBF-URLs + Kartenzentrum auflösen ----------
+# var_tile_region kommt aus dem Host-Menü (exportiert). Zur Kontrolle steht die
+# erhaltene Vorgabe explizit im Log – so sieht man sofort, was gebaut wird.
+msg_info "Regions-Vorgabe vom Host-Menü: var_tile_region='${var_tile_region:-<leer>}' var_tile_urls='${var_tile_urls:-<leer>}'"
 TILE_REGION="${var_tile_region:-${TILE_REGION:-germany}}"
 TILE_URLS_CUSTOM="${var_tile_urls:-${TILE_URLS:-}}"
 WEB_PORT="${var_web_port:-80}"
@@ -70,6 +107,11 @@ setup_docker
 msg_info "Lege /opt/valhalla Stack an"
 mkdir -p /opt/valhalla/custom_files /opt/valhalla/web
 cd /opt/valhalla || exit 1
+# Transparenz: welche Region wurde gebaut (hilft bei "falsche Karte gebaut"-Fragen)
+echo "TILE_REGION=${TILE_REGION}" >/opt/valhalla/REGION
+echo "TILE_URLS=${TILE_URLS}" >>/opt/valhalla/REGION
+echo "CENTER_COORDS=${CENTER_COORDS}" >>/opt/valhalla/REGION
+date -u +"%Y-%m-%dT%H:%M:%SZ BUILD_START" >>/opt/valhalla/REGION
 LOCAL_IP="$(hostname -I | awk '{print $1}')"
 THREADS="$(nproc)"
 msg_ok "Arbeitsverzeichnis bereit (CPU-Threads: $THREADS, IP: $LOCAL_IP)"
@@ -141,9 +183,15 @@ msg_info "Patche Settings-Panel für Profil 'auto' (upstream kennt nur car/bicyc
 # statt mit "Cannot read properties of undefined (reading 'boolean')" zu crashen.
 PANEL=/opt/valhalla/web-app-src/src/components/settings-panel/settings-panel.tsx
 if [[ -f "$PANEL" ]]; then
-  $STD sed -i 's|profileSettings\[profile as ProfileWithSettings\]|(profileSettings[profile as ProfileWithSettings] ?? profileSettings.car)|g' "$PANEL"
-  $STD sed -i 's|generalSettings\[profile as ProfileWithSettings\]|(generalSettings[profile as ProfileWithSettings] ?? generalSettings.car)|g' "$PANEL"
-  msg_ok "Settings-Panel gepatcht"
+  # Idempotent: nach git pull ist der Patch weg (neu patchen), bei
+  # wiederholtem Lauf ohne pull ist er schon drin (überspringen).
+  if grep -q 'profileSettings\[profile as ProfileWithSettings\] ?? profileSettings.car' "$PANEL"; then
+    msg_ok "Settings-Panel bereits gepatcht"
+  else
+    $STD sed -i 's|profileSettings\[profile as ProfileWithSettings\]|(profileSettings[profile as ProfileWithSettings] ?? profileSettings.car)|g' "$PANEL"
+    $STD sed -i 's|generalSettings\[profile as ProfileWithSettings\]|(generalSettings[profile as ProfileWithSettings] ?? generalSettings.car)|g' "$PANEL"
+    msg_ok "Settings-Panel gepatcht"
+  fi
 else
   msg_warn "settings-panel.tsx nicht gefunden – Patch übersprungen"
 fi

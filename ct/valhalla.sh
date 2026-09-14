@@ -47,19 +47,34 @@ color
 catch_errors
 
 # --- Kartenregion interaktiv wählen (nur wenn nichts vorgegeben) ---
+# Eigenes Menü statt msg_menu: msg_menu hat nur 10s Timeout und akzeptiert nur
+# exakte Tags (eine getippte Zahl fällt still auf Default zurück – das hat schon
+# ungewollt ganz Deutschland gebaut). Hier gehen Nummer ODER Name, ohne Timeout.
 if [[ -z "${var_tile_region:-}" && -z "${var_tile_urls:-}" ]]; then
-  if command -v pveversion >/dev/null 2>&1; then
-    var_tile_region=$(msg_menu "Welche Karte soll Valhalla bauen? (Default: ganz Deutschland – braucht 50GB Disk / 8GB RAM, Bau 30-60 Min)" \
-      "germany" "Deutschland (~4 GB PBF, ~25 GB Tiles, 30-60 Min) [Default]" \
-      "bw-bayern" "Baden-Württemberg + Bayern (~2 GB PBF, 15-30 Min)" \
-      "bw" "Baden-Württemberg (~600 MB, ca. 10 Min)" \
-      "bayern" "Bayern (~1,2 GB, ca. 15-20 Min)" \
-      "nrw" "NRW (~500 MB, ca. 10-20 Min)" \
-      "saarland" "Saarland (~50 MB, wenige Minuten)" \
-      "andorra" "Andorra (~8 MB, Test in 2-3 Min)" \
-      "austria" "Österreich (~600 MB)" \
-      "switzerland" "Schweiz (~500 MB)" \
-      "dach" "D-A-CH (3 Dateien, groß!)") || var_tile_region="germany"
+  if command -v pveversion >/dev/null 2>&1 && [[ -t 0 ]]; then
+    echo ""
+    msg_custom "📋" "${BL}" "Welche Karte soll Valhalla bauen? (Default: ganz Deutschland – 50GB Disk / 8GB RAM, Bau 60-180 Min)"
+    echo ""
+    _REGIONS=(germany bw-bayern bw bayern nrw saarland andorra austria switzerland dach)
+    _REGDESC=("Deutschland (~4 GB PBF, Bau 60-180 Min) [Default]" "Baden-Württemberg + Bayern (~2 GB PBF, 15-40 Min)" "Baden-Württemberg (~600 MB, ca. 10 Min)" "Bayern (~1,2 GB, ca. 15-25 Min)" "NRW (~500 MB, ca. 10-20 Min)" "Saarland (~50 MB, wenige Minuten)" "Andorra (~8 MB, Test in 2-3 Min)" "Österreich (~600 MB)" "Schweiz (~500 MB)" "D-A-CH (3 Dateien, groß!)")
+    for _i in "${!_REGIONS[@]}"; do
+      _mark="  "; [[ $_i -eq 0 ]] && _mark="* "
+      printf "${TAB3}${_mark}%d) %s – %s\n" "$((_i + 1))" "${_REGIONS[$_i]}" "${_REGDESC[$_i]}"
+    done
+    echo ""
+    _sel=""
+    read -r -p "${TAB3}Auswahl [Nummer oder Name, default=germany]: " _sel || true
+    _sel="$(echo "${_sel:-}" | tr '[:upper:]' '[:lower:]' | xargs)"
+    var_tile_region="germany"
+    if [[ "$_sel" =~ ^[0-9]+$ ]] && (( _sel >= 1 && _sel <= ${#_REGIONS[@]} )); then
+      var_tile_region="${_REGIONS[$((_sel - 1))]}"
+    else
+      for _r in "${_REGIONS[@]}"; do
+        [[ "$_sel" == "$_r" ]] && var_tile_region="$_r" && break
+      done
+    fi
+    unset _REGIONS _REGDESC _sel _r _i _mark
+    msg_ok "Gewählte Region: ${var_tile_region}"
   else
     var_tile_region="germany"
   fi
