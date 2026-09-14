@@ -17,7 +17,7 @@ network_check
 update_os
 
 # ---------- 1. Region -> PBF-URLs + Kartenzentrum auflösen ----------
-TILE_REGION="${var_tile_region:-${TILE_REGION:-germany}}"
+TILE_REGION="${var_tile_region:-${TILE_REGION:-saarland}}"
 TILE_URLS_CUSTOM="${var_tile_urls:-${TILE_URLS:-}}"
 WEB_PORT="${var_web_port:-80}"
 VALHALLA_PORT="${var_valhalla_port:-8002}"
@@ -43,9 +43,9 @@ if [[ "$TILE_REGION" == "custom" && -z "$TILE_URLS_CUSTOM" ]]; then
 fi
 # Interaktiv nachfragen, falls im Container noch nichts gesetzt (manueller Lauf)
 if [[ -z "${var_tile_region:-}" && -z "${var_tile_urls:-}" && -t 0 ]]; then
-  msg_info "Welche Karte soll gebaut werden? [germany/nrw/saarland/austria/switzerland/dach/andorra]"
-  read -r -p "Region (default: germany): " _r || true
-  TILE_REGION="${_r:-germany}"
+  msg_info "Welche Karte soll gebaut werden? [saarland/andorra/nrw/germany/austria/switzerland/dach]"
+  read -r -p "Region (default: saarland): " _r || true
+  TILE_REGION="${_r:-saarland}"
 fi
 
 RESOLVED="$(resolve_region "$TILE_REGION")"
