@@ -13,17 +13,17 @@ Am Ende: `http://<LXC-IP>/` sofort nutzbar wie `valhalla.openstreetmap.de`
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/HatchetMan111/ValHallaRouting/main/ct/valhalla.sh)"
 ```
 
-Mit Vorgaben (ohne Menü) – Default BW+Bayern:
+Mit Vorgaben (ohne Menü) – Default ganz Deutschland:
 
 ```bash
-var_cpu=4 var_ram=8192 var_disk=40 var_tile_region=bw-bayern \
+var_cpu=4 var_ram=8192 var_disk=50 var_tile_region=germany \
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/HatchetMan111/ValHallaRouting/main/ct/valhalla.sh)"
 ```
 
 Regionen (`var_tile_region`):
-`bw-bayern` (Default, ~2 GB PBF, 15–30 Min) · `bw` (~600 MB) · `bayern` (~1,2 GB)
-· `germany` (30–60 Min, braucht 50 GB Disk + 8 GB RAM!) · `nrw` · `saarland`
-· `andorra` (Test, ~2 Min) · `austria` · `switzerland` · `dach`
+`germany` (Default, ~4 GB PBF, 30–60 Min) · `bw-bayern` (~2 GB PBF, 15–30 Min)
+· `bw` (~600 MB) · `bayern` (~1,2 GB) · `nrw` · `saarland` · `andorra`
+(Test, ~2 Min) · `austria` · `switzerland` · `dach`
 · `custom` (+ `var_tile_urls="https://..."`)
 
 ## Struktur
@@ -52,8 +52,7 @@ cd /opt/valhalla && docker compose ps
 
 ## Ressourcen / Vergrößern
 
-- Default (BW+Bayern): ~2 GB PBF → 4 CPU / 8 GB RAM / 40 GB Disk
-- Germany: ~4 GB PBF, ~25 GB Tiles → 4 CPU / 8 GB RAM / 50+ GB Disk
+- Default (Deutschland): ~4 GB PBF, ~25 GB Tiles → 4 CPU / 8 GB RAM / 50 GB Disk
 - Später vergrößern: in Proxmox-GUI RAM/CPU hoch + `pct resize <CTID> rootfs +20G`
   (oder neue PBF nach `/opt/valhalla/custom_files/` + `./rebuild.sh`)
 - Update: Host-Script erneut laufen lassen (`docker compose pull + up --build`)

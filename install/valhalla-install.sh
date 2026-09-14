@@ -17,7 +17,7 @@ network_check
 update_os
 
 # ---------- 1. Region -> PBF-URLs + Kartenzentrum auflösen ----------
-TILE_REGION="${var_tile_region:-${TILE_REGION:-bw-bayern}}"
+TILE_REGION="${var_tile_region:-${TILE_REGION:-germany}}"
 TILE_URLS_CUSTOM="${var_tile_urls:-${TILE_URLS:-}}"
 WEB_PORT="${var_web_port:-80}"
 VALHALLA_PORT="${var_valhalla_port:-8002}"
@@ -34,8 +34,8 @@ resolve_region() {
   austria)     echo "URLS=https://download.geofabrik.de/europe/austria-latest.osm.pbf|CENTER=47.51,14.55" ;;
   switzerland) echo "URLS=https://download.geofabrik.de/europe/switzerland-latest.osm.pbf|CENTER=46.82,8.22" ;;
   dach)        echo "URLS=https://download.geofabrik.de/europe/germany-latest.osm.pbf https://download.geofabrik.de/europe/austria-latest.osm.pbf https://download.geofabrik.de/europe/switzerland-latest.osm.pbf|CENTER=48.14,11.58" ;;
-  custom)      echo "URLS=${TILE_URLS_CUSTOM}|CENTER=48.80,10.30" ;;
-  *)           echo "URLS=https://download.geofabrik.de/europe/germany/baden-wuerttemberg-latest.osm.pbf https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf|CENTER=48.80,10.30" ;;
+  custom)      echo "URLS=${TILE_URLS_CUSTOM}|CENTER=51.16,10.45" ;;
+  *)           echo "URLS=https://download.geofabrik.de/europe/germany-latest.osm.pbf|CENTER=51.16,10.45" ;;
   esac
 }
 
@@ -46,9 +46,9 @@ if [[ "$TILE_REGION" == "custom" && -z "$TILE_URLS_CUSTOM" ]]; then
 fi
 # Interaktiv nachfragen, falls im Container noch nichts gesetzt (manueller Lauf)
 if [[ -z "${var_tile_region:-}" && -z "${var_tile_urls:-}" && -t 0 ]]; then
-  msg_info "Welche Karte soll gebaut werden? [bw-bayern/bw/bayern/germany/nrw/saarland/andorra/austria/switzerland/dach]"
-  read -r -p "Region (default: bw-bayern): " _r || true
-  TILE_REGION="${_r:-bw-bayern}"
+  msg_info "Welche Karte soll gebaut werden? [germany/bw-bayern/bw/bayern/nrw/saarland/andorra/austria/switzerland/dach]"
+  read -r -p "Region (default: germany): " _r || true
+  TILE_REGION="${_r:-germany}"
 fi
 
 RESOLVED="$(resolve_region "$TILE_REGION")"

@@ -23,7 +23,7 @@ APP="Valhalla"
 var_tags="${var_tags:-routing;maps;valhalla}"
 var_cpu="${var_cpu:-4}"
 var_ram="${var_ram:-8192}"
-var_disk="${var_disk:-40}"
+var_disk="${var_disk:-50}"
 var_os="${var_os:-debian}"
 var_version="${var_version:-13}"
 var_arch="${var_arch:-amd64}"
@@ -32,10 +32,9 @@ var_unprivileged="${var_unprivileged:-1}"
 # Docker in LXC braucht nesting + keyctl
 var_features="${var_features:-nesting=1,keyctl=1}"
 
-# Kartenregion: bw-bayern | bw | bayern | germany | nrw | saarland | andorra | austria | switzerland | dach | custom
-# Kann per Umgebungsvariable vorgegeben werden, z. B. var_tile_region=bw-bayern
-# Hinweis: Default BW+Bayern (~2 GB PBF, braucht 40 GB Disk + 8 GB RAM).
-# Für ganz Germany Disk auf 50+ GB erhöhen (pct resize + RAM in Proxmox-GUI).
+# Kartenregion: germany | bw-bayern | bw | bayern | nrw | saarland | andorra | austria | switzerland | dach | custom
+# Kann per Umgebungsvariable vorgegeben werden, z. B. var_tile_region=germany
+# Hinweis: Default ganz Deutschland (~4 GB PBF, ~25 GB Tiles, braucht 50 GB Disk + 8 GB RAM).
 var_tile_region="${var_tile_region:-}"
 var_tile_urls="${var_tile_urls:-}"
 var_web_port="${var_web_port:-80}"
@@ -49,19 +48,19 @@ catch_errors
 # --- Kartenregion interaktiv wählen (nur wenn nichts vorgegeben) ---
 if [[ -z "${var_tile_region:-}" && -z "${var_tile_urls:-}" ]]; then
   if command -v pveversion >/dev/null 2>&1; then
-    var_tile_region=$(msg_menu "Welche Karte soll Valhalla bauen? (BW+Bayern ist Default – Germany braucht 50GB+ Disk / 8GB RAM)" \
-      "bw-bayern" "Baden-Württemberg + Bayern (~2 GB PBF, 15-30 Min, 40 GB Disk) [Default]" \
+    var_tile_region=$(msg_menu "Welche Karte soll Valhalla bauen? (Default: ganz Deutschland – braucht 50GB Disk / 8GB RAM, Bau 30-60 Min)" \
+      "germany" "Deutschland (~4 GB PBF, ~25 GB Tiles, 30-60 Min) [Default]" \
+      "bw-bayern" "Baden-Württemberg + Bayern (~2 GB PBF, 15-30 Min)" \
       "bw" "Baden-Württemberg (~600 MB, ca. 10 Min)" \
       "bayern" "Bayern (~1,2 GB, ca. 15-20 Min)" \
-      "germany" "Deutschland (~4 GB PBF, ~25 GB Tiles, 30-60 Min, braucht 50 GB Disk + 8 GB RAM!)" \
       "nrw" "NRW (~500 MB, ca. 10-20 Min)" \
       "saarland" "Saarland (~50 MB, wenige Minuten)" \
       "andorra" "Andorra (~8 MB, Test in 2-3 Min)" \
       "austria" "Österreich (~600 MB)" \
       "switzerland" "Schweiz (~500 MB)" \
-      "dach" "D-A-CH (3 Dateien, groß!)") || var_tile_region="bw-bayern"
+      "dach" "D-A-CH (3 Dateien, groß!)") || var_tile_region="germany"
   else
-    var_tile_region="bw-bayern"
+    var_tile_region="germany"
   fi
 fi
 export var_tile_region var_tile_urls var_web_port var_valhalla_port
