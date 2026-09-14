@@ -19,7 +19,8 @@ source "$_cs_boot" 2>/dev/null || source <(curl -fsSL "${COMMUNITY_SCRIPTS_CORE_
 # Source Valhalla: https://github.com/valhalla/valhalla
 # Source Web-App:  https://github.com/valhalla/web-app
 
-APP="Valhalla"
+APP="ValhallRouting"
+var_hostname="${var_hostname:-ValhallRouting}"
 var_tags="${var_tags:-routing;maps;valhalla}"
 var_cpu="${var_cpu:-4}"
 var_ram="${var_ram:-8192}"
