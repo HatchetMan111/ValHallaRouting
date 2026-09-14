@@ -120,15 +120,30 @@ else
 fi
 
 msg_info "Schreibe .env für Offline-LAN-Betrieb (API=/valhalla)"
+# WICHTIG: Default NICHT 'auto' – das Settings-Panel von upstream kennt 'auto'
+# nicht (profileSettings/generalSettings haben keinen auto-Key) und crasht mit
+# "Cannot read properties of undefined (reading 'boolean')". Upstream-Default: bicycle.
 cat <<EOF >/opt/valhalla/web-app-src/.env
 SKIP_PREFLIGHT_CHECK=true
 VITE_VALHALLA_URL=/valhalla
 VITE_NOMINATIM_URL=https://nominatim.openstreetmap.org
 VITE_TILE_SERVER_URL="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 VITE_CENTER_COORDS="${CENTER_COORDS}"
-VITE_DEFAULT_COSTING_MODEL=auto
+VITE_DEFAULT_COSTING_MODEL=bicycle
 VITE_CLIENT_ID=valhalla-pve-lxc
 EOF
+
+msg_info "Patche Settings-Panel für Profil 'auto' (upstream kennt nur car/bicycle/...) "
+# Falls der User im UI trotzdem auf 'auto' stellt: auf 'car'-Settings zurückfallen
+# statt mit "Cannot read properties of undefined (reading 'boolean')" zu crashen.
+PANEL=/opt/valhalla/web-app-src/src/components/settings-panel/settings-panel.tsx
+if [[ -f "$PANEL" ]]; then
+  $STD sed -i 's|profileSettings\[profile as ProfileWithSettings\]|(profileSettings[profile as ProfileWithSettings] ?? profileSettings.car)|g' "$PANEL"
+  $STD sed -i 's|generalSettings\[profile as ProfileWithSettings\]|(generalSettings[profile as ProfileWithSettings] ?? generalSettings.car)|g' "$PANEL"
+  msg_ok "Settings-Panel gepatcht"
+else
+  msg_warn "settings-panel.tsx nicht gefunden – Patch übersprungen"
+fi
 
 msg_info "Erstelle Web-Dockerfile + nginx Reverse-Proxy"
 cat <<'EOF' >/opt/valhalla/web/Dockerfile
