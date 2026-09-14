@@ -21,16 +21,27 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/HatchetMan111/ValHallaRo
 ```
 
 Regionen (`var_tile_region`):
-`germany` (Default, ~4 GB PBF, 30–60 Min) · `bw-bayern` (~2 GB PBF, 15–30 Min)
-· `bw` (~600 MB) · `bayern` (~1,2 GB) · `nrw` · `saarland` · `andorra`
-(Test, ~2 Min) · `austria` · `switzerland` · `dach`
+`germany` (Default, ~4 GB PBF, 60–180 Min) · alle 16 Bundesländer einzeln
+(`bw` `bayern` `berlin` `brandenburg` `bremen` `hamburg` `hessen`
+`mecklenburg-vorpommern` `niedersachsen` `nrw` `rheinland-pfalz` `saarland`
+`sachsen` `sachsen-anhalt` `schleswig-holstein` `thueringen`)
+· Kombis (`bw-bayern`, oder Leerzeichen-getrennt wie `"bw bayern hessen"`)
+· `austria` · `switzerland` · `dach` · `andorra` (Test, ~2 Min)
 · `custom` (+ `var_tile_urls="https://..."`)
+
+Es wird **nur** die gewählte Region von Geofabrik geladen (kein stiller
+Germany-Fallback; unbekannte Namen brechen mit Fehler ab). Im Menü mehrere
+Länder Komma-getrennt wählen, z. B. `4,5` — oder per Variable:
+
+```bash
+var_tile_region="bw bayern" bash -c "$(curl -fsSL https://raw.githubusercontent.com/HatchetMan111/ValHallaRouting/main/ct/valhalla.sh)"
+```
 
 ## Struktur
 
 ```
-ct/valhalla.sh            # Host-Script: erstellt LXC (Debian 13, Docker, nesting)
-install/valhalla-install.sh  # läuft IM Container: Docker-Stack /opt/valhalla
+ct/valhalla.sh                  # Host-Script: erstellt LXC (Debian 13, Docker, nesting)
+install/valhallrouting-install.sh  # läuft IM Container: Docker-Stack /opt/valhalla
 ```
 
 Stack in `/opt/valhalla`:
@@ -53,6 +64,8 @@ cd /opt/valhalla && docker compose ps
 ## Ressourcen / Vergrößern
 
 - Default (Deutschland): ~4 GB PBF, ~25 GB Tiles → 4 CPU / 8 GB RAM / 50 GB Disk
+- Tiles-Bau läuft mit 2 Threads (Germany crasht mit 4 Threads auf 8 GB);
+  mehr nur mit mehr RAM: `var_server_threads=4`
 - Später vergrößern: in Proxmox-GUI RAM/CPU hoch + `pct resize <CTID> rootfs +20G`
   (oder neue PBF nach `/opt/valhalla/custom_files/` + `./rebuild.sh`)
 - Update: Host-Script erneut laufen lassen (`docker compose pull + up --build`)

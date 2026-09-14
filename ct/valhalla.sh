@@ -33,8 +33,9 @@ var_unprivileged="${var_unprivileged:-1}"
 # Docker in LXC braucht nesting + keyctl
 var_features="${var_features:-nesting=1,keyctl=1}"
 
-# Kartenregion: germany | bw-bayern | bw | bayern | nrw | saarland | andorra | austria | switzerland | dach | custom
-# Kann per Umgebungsvariable vorgegeben werden, z. B. var_tile_region=germany
+# Kartenregion: germany | bw-bayern | bw | bayern | berlin | brandenburg | ... (alle 16 Bundesländer)
+# | nrw | austria | switzerland | dach | andorra | custom – mehrere mit Leerzeichen trennen,
+# z. B. var_tile_region="bw bayern". Nur exakt diese Region(en) werden von Geofabrik geladen.
 # Hinweis: Default ganz Deutschland (~4 GB PBF, ~25 GB Tiles, braucht 50 GB Disk + 8 GB RAM).
 var_tile_region="${var_tile_region:-}"
 var_tile_urls="${var_tile_urls:-}"
@@ -49,32 +50,51 @@ catch_errors
 # --- Kartenregion interaktiv wählen (nur wenn nichts vorgegeben) ---
 # Eigenes Menü statt msg_menu: msg_menu hat nur 10s Timeout und akzeptiert nur
 # exakte Tags (eine getippte Zahl fällt still auf Default zurück – das hat schon
-# ungewollt ganz Deutschland gebaut). Hier gehen Nummer ODER Name, ohne Timeout.
+# ungewollt ganz Deutschland gebaut). Hier gehen Nummer ODER Name, ohne Timeout,
+# mehrere Bundesländer Komma-getrennt (z. B. "3,4" oder "bw,bayern").
 if [[ -z "${var_tile_region:-}" && -z "${var_tile_urls:-}" ]]; then
   if command -v pveversion >/dev/null 2>&1 && [[ -t 0 ]]; then
     echo ""
     msg_custom "📋" "${BL}" "Welche Karte soll Valhalla bauen? (Default: ganz Deutschland – 50GB Disk / 8GB RAM, Bau 60-180 Min)"
+    msg_custom "📋" "${BL}" "Mehrere Bundesländer mit Komma trennen, z. B. 4,5 oder bw,bayern"
     echo ""
-    _REGIONS=(germany bw-bayern bw bayern nrw saarland andorra austria switzerland dach)
-    _REGDESC=("Deutschland (~4 GB PBF, Bau 60-180 Min) [Default]" "Baden-Württemberg + Bayern (~2 GB PBF, 15-40 Min)" "Baden-Württemberg (~600 MB, ca. 10 Min)" "Bayern (~1,2 GB, ca. 15-25 Min)" "NRW (~500 MB, ca. 10-20 Min)" "Saarland (~50 MB, wenige Minuten)" "Andorra (~8 MB, Test in 2-3 Min)" "Österreich (~600 MB)" "Schweiz (~500 MB)" "D-A-CH (3 Dateien, groß!)")
+    _REGIONS=(germany bw-bayern bw bayern berlin brandenburg bremen hamburg hessen mecklenburg-vorpommern niedersachsen nrw rheinland-pfalz saarland sachsen sachsen-anhalt schleswig-holstein thueringen austria switzerland dach andorra)
+    _REGDESC=("Deutschland komplett (~4 GB PBF, 60-180 Min) [Default]" "Baden-Württemberg + Bayern (~2 GB PBF, 15-40 Min)" "Baden-Württemberg (~650 MB)" "Bayern (~1,3 GB)" "Berlin (~120 MB)" "Brandenburg (~350 MB)" "Bremen (~35 MB)" "Hamburg (~90 MB)" "Hessen (~550 MB)" "Mecklenburg-Vorpommern (~250 MB)" "Niedersachsen (~550 MB)" "Nordrhein-Westfalen (~700 MB)" "Rheinland-Pfalz (~400 MB)" "Saarland (~50 MB)" "Sachsen (~300 MB)" "Sachsen-Anhalt (~250 MB)" "Schleswig-Holstein (~350 MB)" "Thüringen (~250 MB)" "Österreich (~600 MB)" "Schweiz (~500 MB)" "D-A-CH (3 Länder, groß!)" "Andorra (~8 MB, Test)")
     for _i in "${!_REGIONS[@]}"; do
       _mark="  "; [[ $_i -eq 0 ]] && _mark="* "
       printf "${TAB3}${_mark}%d) %s – %s\n" "$((_i + 1))" "${_REGIONS[$_i]}" "${_REGDESC[$_i]}"
     done
     echo ""
     _sel=""
-    read -r -p "${TAB3}Auswahl [Nummer oder Name, default=germany]: " _sel || true
-    _sel="$(echo "${_sel:-}" | tr '[:upper:]' '[:lower:]' | xargs)"
+    read -r -p "${TAB3}Auswahl [Nummern/Namen, Komma-getrennt, default=germany]: " _sel || true
+    _sel="$(echo "${_sel:-}" | tr ',' ' ' | tr '[:upper:]' '[:lower:]')"
     var_tile_region="germany"
-    if [[ "$_sel" =~ ^[0-9]+$ ]] && (( _sel >= 1 && _sel <= ${#_REGIONS[@]} )); then
-      var_tile_region="${_REGIONS[$((_sel - 1))]}"
-    else
-      for _r in "${_REGIONS[@]}"; do
-        [[ "$_sel" == "$_r" ]] && var_tile_region="$_r" && break
+    if [[ -n "${_sel// /}" ]]; then
+      _picked=()
+      _ok=1
+      for _t in $_sel; do
+        if [[ "$_t" =~ ^[0-9]+$ ]] && (( _t >= 1 && _t <= ${#_REGIONS[@]} )); then
+          _picked+=("${_REGIONS[$((_t - 1))]}")
+        else
+          _found=0
+          for _r in "${_REGIONS[@]}"; do
+            if [[ "$_t" == "$_r" ]]; then _picked+=("$_r"); _found=1; break; fi
+          done
+          (( _found )) || _ok=0
+        fi
       done
+      # germany sticht alles andere (Mix mit Gesamt-DE wäre sinnlos)
+      for _p in "${_picked[@]:-}"; do
+        if [[ "$_p" == "germany" ]]; then _picked=(germany); break; fi
+      done
+      if (( _ok )) && (( ${#_picked[@]} > 0 )); then
+        var_tile_region="${_picked[*]}"
+      else
+        msg_warn "Ungültige Auswahl – nehme Default: germany"
+      fi
     fi
-    unset _REGIONS _REGDESC _sel _r _i _mark
-    msg_ok "Gewählte Region: ${var_tile_region}"
+    unset _REGIONS _REGDESC _sel _t _r _p _i _mark _picked _found _ok
+    msg_ok "Gewählte Region(en): ${var_tile_region}"
   else
     var_tile_region="germany"
   fi

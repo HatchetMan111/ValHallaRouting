@@ -59,21 +59,51 @@ TILE_URLS_CUSTOM="${var_tile_urls:-${TILE_URLS:-}}"
 WEB_PORT="${var_web_port:-80}"
 VALHALLA_PORT="${var_valhalla_port:-8002}"
 
-resolve_region() {
+# Regions-Auflösung: region_entry() liefert pro Key EINE URL ("URL|CENTER"),
+# resolve_multi() kombiniert mehrere Keys (Leerzeichen-getrennt) zu URL-Listen.
+# Es wird NUR geladen, was gewählt wurde – kein stiller Germany-Fallback.
+region_entry() {
   case "$1" in
-  andorra)     echo "URLS=https://download.geofabrik.de/europe/andorra-latest.osm.pbf|CENTER=42.55,1.58" ;;
-  saarland)    echo "URLS=https://download.geofabrik.de/europe/germany/saarland-latest.osm.pbf|CENTER=49.38,7.07" ;;
-  nrw)         echo "URLS=https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf|CENTER=51.43,7.66" ;;
-  bw)          echo "URLS=https://download.geofabrik.de/europe/germany/baden-wuerttemberg-latest.osm.pbf|CENTER=48.50,9.00" ;;
-  bayern)      echo "URLS=https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf|CENTER=49.00,11.40" ;;
-  bw-bayern)   echo "URLS=https://download.geofabrik.de/europe/germany/baden-wuerttemberg-latest.osm.pbf https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf|CENTER=48.80,10.30" ;;
-  germany)     echo "URLS=https://download.geofabrik.de/europe/germany-latest.osm.pbf|CENTER=51.16,10.45" ;;
-  austria)     echo "URLS=https://download.geofabrik.de/europe/austria-latest.osm.pbf|CENTER=47.51,14.55" ;;
-  switzerland) echo "URLS=https://download.geofabrik.de/europe/switzerland-latest.osm.pbf|CENTER=46.82,8.22" ;;
-  dach)        echo "URLS=https://download.geofabrik.de/europe/germany-latest.osm.pbf https://download.geofabrik.de/europe/austria-latest.osm.pbf https://download.geofabrik.de/europe/switzerland-latest.osm.pbf|CENTER=48.14,11.58" ;;
-  custom)      echo "URLS=${TILE_URLS_CUSTOM}|CENTER=51.16,10.45" ;;
-  *)           echo "URLS=https://download.geofabrik.de/europe/germany-latest.osm.pbf|CENTER=51.16,10.45" ;;
+  andorra)                  echo "https://download.geofabrik.de/europe/andorra-latest.osm.pbf|42.55,1.58" ;;
+  saarland)                 echo "https://download.geofabrik.de/europe/germany/saarland-latest.osm.pbf|49.38,7.07" ;;
+  nrw|nordrhein-westfalen)  echo "https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf|51.43,7.66" ;;
+  bw|baden-wuerttemberg)    echo "https://download.geofabrik.de/europe/germany/baden-wuerttemberg-latest.osm.pbf|48.50,9.00" ;;
+  bayern)                   echo "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf|49.00,11.40" ;;
+  berlin)                   echo "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf|52.52,13.40" ;;
+  brandenburg)              echo "https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf|52.40,13.00" ;;
+  bremen)                   echo "https://download.geofabrik.de/europe/germany/bremen-latest.osm.pbf|53.08,8.80" ;;
+  hamburg)                  echo "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf|53.55,10.00" ;;
+  hessen)                   echo "https://download.geofabrik.de/europe/germany/hessen-latest.osm.pbf|50.60,8.70" ;;
+  mecklenburg-vorpommern|meckpomm|mv) echo "https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf|53.80,12.40" ;;
+  niedersachsen)            echo "https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf|52.80,9.00" ;;
+  rheinland-pfalz|rlp)      echo "https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest.osm.pbf|49.90,7.45" ;;
+  sachsen)                  echo "https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf|51.10,13.30" ;;
+  sachsen-anhalt)           echo "https://download.geofabrik.de/europe/germany/sachsen-anhalt-latest.osm.pbf|51.90,11.60" ;;
+  schleswig-holstein|sh)    echo "https://download.geofabrik.de/europe/germany/schleswig-holstein-latest.osm.pbf|54.10,9.70" ;;
+  thueringen)               echo "https://download.geofabrik.de/europe/germany/thueringen-latest.osm.pbf|50.90,11.00" ;;
+  germany)                  echo "https://download.geofabrik.de/europe/germany-latest.osm.pbf|51.16,10.45" ;;
+  austria)                  echo "https://download.geofabrik.de/europe/austria-latest.osm.pbf|47.51,14.55" ;;
+  switzerland)              echo "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf|46.82,8.22" ;;
+  *) return 1 ;;
   esac
+}
+
+resolve_multi() {
+  local input="$1" r e u c urls="" center=""
+  # Komfort-Kombis auf Einzel-Keys zurückführen
+  input="${input//bw-bayern/bw bayern}"
+  input="${input//dach/germany austria switzerland}"
+  for r in $input; do
+    if ! e="$(region_entry "$r")"; then
+      msg_error "Unbekannte Region '$r' (TILE_REGION='$TILE_REGION')"
+      msg_error "Gültig: germany bw-bayern bw bayern berlin brandenburg bremen hamburg hessen mecklenburg-vorpommern niedersachsen nrw rheinland-pfalz saarland sachsen sachsen-anhalt schleswig-holstein thueringen austria switzerland dach andorra custom"
+      exit 1
+    fi
+    u="${e%%|*}"; c="${e##*|}"
+    urls="${urls:+$urls }$u"
+    [[ -z "$center" ]] && center="$c"
+  done
+  echo "URLS=${urls}|CENTER=${center}"
 }
 
 if [[ -n "$TILE_URLS_CUSTOM" && -z "$TILE_REGION" ]]; then TILE_REGION="custom"; fi
@@ -83,15 +113,19 @@ if [[ "$TILE_REGION" == "custom" && -z "$TILE_URLS_CUSTOM" ]]; then
 fi
 # Interaktiv nachfragen, falls im Container noch nichts gesetzt (manueller Lauf)
 if [[ -z "${var_tile_region:-}" && -z "${var_tile_urls:-}" && -t 0 ]]; then
-  msg_info "Welche Karte soll gebaut werden? [germany/bw-bayern/bw/bayern/nrw/saarland/andorra/austria/switzerland/dach]"
+  msg_info "Welche Karte soll gebaut werden? [germany | Bundesländer: bw bayern berlin brandenburg bremen hamburg hessen mecklenburg-vorpommern niedersachsen nrw rheinland-pfalz saarland sachsen sachsen-anhalt schleswig-holstein thueringen – mehrere mit Leerzeichen, z. B. 'bw bayern']"
   read -r -p "Region (default: germany): " _r || true
   TILE_REGION="${_r:-germany}"
 fi
 
-RESOLVED="$(resolve_region "$TILE_REGION")"
-TILE_URLS="$(echo "$RESOLVED" | cut -d'|' -f1 | cut -d'=' -f2-)"
-CENTER_COORDS="$(echo "$RESOLVED" | cut -d'|' -f2 | cut -d'=' -f2)"
-if [[ "$TILE_REGION" == "custom" ]]; then TILE_URLS="$TILE_URLS_CUSTOM"; fi
+if [[ "$TILE_REGION" == "custom" ]]; then
+  TILE_URLS="$TILE_URLS_CUSTOM"
+  CENTER_COORDS="51.16,10.45"
+else
+  RESOLVED="$(resolve_multi "$TILE_REGION")"
+  TILE_URLS="$(echo "$RESOLVED" | cut -d'|' -f1 | cut -d'=' -f2-)"
+  CENTER_COORDS="$(echo "$RESOLVED" | cut -d'|' -f2 | cut -d'=' -f2)"
+fi
 
 msg_info "Region: $TILE_REGION | Zentrum: $CENTER_COORDS"
 msg_info "PBF-Quelle(n): $TILE_URLS"
@@ -113,7 +147,9 @@ echo "TILE_URLS=${TILE_URLS}" >>/opt/valhalla/REGION
 echo "CENTER_COORDS=${CENTER_COORDS}" >>/opt/valhalla/REGION
 date -u +"%Y-%m-%dT%H:%M:%SZ BUILD_START" >>/opt/valhalla/REGION
 LOCAL_IP="$(hostname -I | awk '{print $1}')"
-THREADS="$(nproc)"
+# Build-Threads: Default 2 (Germany crasht mit 4 Threads auf 8 GB RAM gern mit
+# Segfault in der enhance-Phase). Höher nur mit mehr RAM: var_server_threads=4.
+THREADS="${var_server_threads:-${SERVER_THREADS:-2}}"
 msg_ok "Arbeitsverzeichnis bereit (CPU-Threads: $THREADS, IP: $LOCAL_IP)"
 
 # ---------- 4. docker-compose.yml ----------
