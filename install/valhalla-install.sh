@@ -97,7 +97,9 @@ services:
     stop_grace_period: 30s
 
   web:
-    build: ./web
+    build:
+      context: .
+      dockerfile: ./web/Dockerfile
     container_name: valhalla-web
     restart: unless-stopped
     ports:
@@ -132,12 +134,12 @@ msg_info "Erstelle Web-Dockerfile + nginx Reverse-Proxy"
 cat <<'EOF' >/opt/valhalla/web/Dockerfile
 FROM node:24-alpine AS builder
 WORKDIR /app
-COPY ../web-app-src /app
+COPY ./web-app-src /app
 RUN npm i && npm run build
 
 FROM nginx:1.29-alpine
 COPY --from=builder /app/build /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY ./web/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 EOF
@@ -166,6 +168,11 @@ server {
     try_files $uri $uri/ /index.html;
   }
 }
+EOF
+# Build-Kontext ist /opt/valhalla (.) -> custom_files (GBs!) + .git vom Build ausschließen
+cat <<'EOF' >/opt/valhalla/.dockerignore
+custom_files
+web-app-src/.git
 EOF
 msg_ok "Web-Build-Kontext fertig"
 
