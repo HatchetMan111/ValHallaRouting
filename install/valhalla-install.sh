@@ -17,7 +17,7 @@ network_check
 update_os
 
 # ---------- 1. Region -> PBF-URLs + Kartenzentrum auflösen ----------
-TILE_REGION="${var_tile_region:-${TILE_REGION:-saarland}}"
+TILE_REGION="${var_tile_region:-${TILE_REGION:-bw-bayern}}"
 TILE_URLS_CUSTOM="${var_tile_urls:-${TILE_URLS:-}}"
 WEB_PORT="${var_web_port:-80}"
 VALHALLA_PORT="${var_valhalla_port:-8002}"
@@ -27,12 +27,15 @@ resolve_region() {
   andorra)     echo "URLS=https://download.geofabrik.de/europe/andorra-latest.osm.pbf|CENTER=42.55,1.58" ;;
   saarland)    echo "URLS=https://download.geofabrik.de/europe/germany/saarland-latest.osm.pbf|CENTER=49.38,7.07" ;;
   nrw)         echo "URLS=https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf|CENTER=51.43,7.66" ;;
+  bw)          echo "URLS=https://download.geofabrik.de/europe/germany/baden-wuerttemberg-latest.osm.pbf|CENTER=48.50,9.00" ;;
+  bayern)      echo "URLS=https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf|CENTER=49.00,11.40" ;;
+  bw-bayern)   echo "URLS=https://download.geofabrik.de/europe/germany/baden-wuerttemberg-latest.osm.pbf https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf|CENTER=48.80,10.30" ;;
   germany)     echo "URLS=https://download.geofabrik.de/europe/germany-latest.osm.pbf|CENTER=51.16,10.45" ;;
   austria)     echo "URLS=https://download.geofabrik.de/europe/austria-latest.osm.pbf|CENTER=47.51,14.55" ;;
   switzerland) echo "URLS=https://download.geofabrik.de/europe/switzerland-latest.osm.pbf|CENTER=46.82,8.22" ;;
   dach)        echo "URLS=https://download.geofabrik.de/europe/germany-latest.osm.pbf https://download.geofabrik.de/europe/austria-latest.osm.pbf https://download.geofabrik.de/europe/switzerland-latest.osm.pbf|CENTER=48.14,11.58" ;;
-  custom)      echo "URLS=${TILE_URLS_CUSTOM}|CENTER=51.16,10.45" ;;
-  *)           echo "URLS=https://download.geofabrik.de/europe/germany-latest.osm.pbf|CENTER=51.16,10.45" ;;
+  custom)      echo "URLS=${TILE_URLS_CUSTOM}|CENTER=48.80,10.30" ;;
+  *)           echo "URLS=https://download.geofabrik.de/europe/germany/baden-wuerttemberg-latest.osm.pbf https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf|CENTER=48.80,10.30" ;;
   esac
 }
 
@@ -43,9 +46,9 @@ if [[ "$TILE_REGION" == "custom" && -z "$TILE_URLS_CUSTOM" ]]; then
 fi
 # Interaktiv nachfragen, falls im Container noch nichts gesetzt (manueller Lauf)
 if [[ -z "${var_tile_region:-}" && -z "${var_tile_urls:-}" && -t 0 ]]; then
-  msg_info "Welche Karte soll gebaut werden? [saarland/andorra/nrw/germany/austria/switzerland/dach]"
-  read -r -p "Region (default: saarland): " _r || true
-  TILE_REGION="${_r:-saarland}"
+  msg_info "Welche Karte soll gebaut werden? [bw-bayern/bw/bayern/germany/nrw/saarland/andorra/austria/switzerland/dach]"
+  read -r -p "Region (default: bw-bayern): " _r || true
+  TILE_REGION="${_r:-bw-bayern}"
 fi
 
 RESOLVED="$(resolve_region "$TILE_REGION")"
