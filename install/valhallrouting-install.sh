@@ -145,12 +145,58 @@ cd /opt/valhalla || exit 1
 echo "TILE_REGION=${TILE_REGION}" >/opt/valhalla/REGION
 echo "TILE_URLS=${TILE_URLS}" >>/opt/valhalla/REGION
 echo "CENTER_COORDS=${CENTER_COORDS}" >>/opt/valhalla/REGION
-date -u +"%Y-%m-%dT%H:%M:%SZ BUILD_START" >>/opt/valhalla/REGION
+echo "# BUILD_START $(date -u +"%Y-%m-%dT%H:%M:%SZ")" >>/opt/valhalla/REGION
 LOCAL_IP="$(hostname -I | awk '{print $1}')"
-# Build-Threads: Default 2 (Germany crasht mit 4 Threads auf 8 GB RAM gern mit
-# Segfault in der enhance-Phase). Höher nur mit mehr RAM: var_server_threads=4.
-THREADS="${var_server_threads:-${SERVER_THREADS:-2}}"
-msg_ok "Arbeitsverzeichnis bereit (CPU-Threads: $THREADS, IP: $LOCAL_IP)"
+# Build-Threads: sicherer Auto-Modus gegen den bekannten enhance-OOM-Segfault.
+# Regel: 1 Thread pro ~4 GB RAM (valhalla/docs + Issue #5947: 1:2 Thread:GB als Minimum,
+# enhance-Phase spikes darüber). germany/dach auf 8 GB -> 1, sonst max. 2.
+# var_server_threads (vom Host exportiert) gewinnt immer, wird aber bei OOM-Risiko gedeckelt.
+MEM_MB="$(free -m 2>/dev/null | awk '/^Mem:/{print $2}')"
+MEM_MB="${MEM_MB:-8192}"
+THREADS_REQ="${var_server_threads:-${SERVER_THREADS:-}}"
+if [[ -z "$THREADS_REQ" ]]; then
+  if [[ "$TILE_REGION" == *germany* || "$TILE_REGION" == *dach* ]]; then
+    THREADS=1
+  else
+    THREADS=2
+  fi
+  # Kleine Container (<6 GB RAM) immer auf 1 Thread runter
+  if (( MEM_MB < 6144 )); then THREADS=1; fi
+else
+  THREADS="$THREADS_REQ"
+  # Deckel: mehr als MEM/2048 Threads ist OOM-sicherungsrelevant (min. 1, max. 8)
+  _MAX_T=$(( MEM_MB / 2048 ))
+  (( _MAX_T < 1 )) && _MAX_T=1
+  (( _MAX_T > 8 )) && _MAX_T=8
+  if (( THREADS > _MAX_T )); then
+    msg_warn "var_server_threads=${THREADS} zu hoch für ${MEM_MB} MB RAM (max ${_MAX_T}) – deckele auf ${_MAX_T} (OOM-Segfault-Schutz)"
+    THREADS="$_MAX_T"
+  fi
+  # Germany/DACH-Extra: selbst bei viel RAM max. 2 für den Build (enhance-Spikes)
+  if [[ "$TILE_REGION" == *germany* || "$TILE_REGION" == *dach* ]] && (( THREADS > 2 )) && (( MEM_MB < 16384 )); then
+    msg_warn "Germany/DACH-Build mit ${THREADS} Threads auf ${MEM_MB} MB RAM riskiert enhance-Segfault – deckele auf 2"
+    THREADS=2
+  fi
+fi
+msg_ok "Arbeitsverzeichnis bereit (Build-/Server-Threads: $THREADS, RAM: ${MEM_MB} MB, IP: $LOCAL_IP)"
+
+# Swap als OOM-Airbag: Germany braucht beim Enhancen kurz mehr als 8 GB.
+# Falls kein Swap aktiv und RAM < 16 GB -> 8 GB Swapfile anlegen (idempotent).
+if (( MEM_MB < 16384 )); then
+  if ! swapon --show 2>/dev/null | grep -q .; then
+    msg_info "Lege 8 GB Swap an (OOM-Schutz für Tile-Build)"
+    fallocate -l 8G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none || true
+    chmod 600 /swapfile 2>/dev/null || true
+    mkswap /swapfile >/dev/null 2>&1 || true
+    swapon /swapfile 2>/dev/null || msg_warn "swapon blockiert (LXC ohne swap-Recht?) – im Proxmox-Host ggf. Swap für den CT erlauben"
+    grep -q '/swapfile' /etc/fstab 2>/dev/null || echo '/swapfile none swap sw 0 0' >>/etc/fstab
+  fi
+fi
+# Build ohne Swap + wenig RAM = fast sicherer Kill -> früh abbrechen mit klarer Meldung
+if (( MEM_MB < 4096 )) && ! swapon --show 2>/dev/null | grep -q .; then
+  msg_error "Nur ${MEM_MB} MB RAM ohne Swap – Tile-Build wird mit Segfault/OOM sterben. Brich ab: mehr RAM geben oder Swap erlauben."
+  exit 1
+fi
 
 # ---------- 4. docker-compose.yml ----------
 cat <<EOF >/opt/valhalla/docker-compose.yml
@@ -176,6 +222,12 @@ services:
       - server_threads=${THREADS}
       - use_default_speeds_config=True
     stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8002/status >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
 
   web:
     build:
@@ -252,14 +304,20 @@ server {
   server_name _;
   root /usr/share/nginx/html;
   index index.html;
+  client_max_body_size 10m;
 
   # Valhalla-API hinter gleichem Origin (kein CORS-Problem, IP-unabhängig)
-  # Frontend ruft /valhalla/route, /valhalla/isochrone, ... auf
+  # Frontend ruft /valhalla/route, /valhalla/optimized_route, /valhalla/matrix,
+  # /valhalla/isochrone, /valhalla/status auf. optimized_route/matrix senden
+  # große POST-Bodies -> Timeouts + Buffer großzügig.
   location /valhalla/ {
     rewrite ^/valhalla/(.*) /$1 break;
     proxy_pass http://valhalla:8002;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
+    proxy_http_version 1.1;
+    proxy_request_buffering off;
+    proxy_buffering off;
     proxy_connect_timeout 60s;
     proxy_send_timeout 300s;
     proxy_read_timeout 300s;
@@ -314,28 +372,93 @@ else
   msg_warn "Web-App noch nicht erreichbar – prüfe: docker logs valhalla-web"
 fi
 
-# ---------- 8. Hilfsskripte + MOTD ----------
+# ---------- 8. Smoke-Test: Route + Optimized Route IN der gebauten Region ----------
+# Häufigste "Fehlermeldung" ist NoSegment: Testpunkt liegt AUSSERHALB der Tiles
+# (z. B. München testen, aber nur Saarland gebaut). Deshalb testen wir um CENTER.
+if [[ "$READY" == "1" ]]; then
+  _CLAT="${CENTER_COORDS%%,*}"; _CLON="${CENTER_COORDS##*,}"
+  _LAT2="$(awk "BEGIN{print ${_CLAT}+0.05}")"; _LON2="$(awk "BEGIN{print ${_CLON}+0.07}")"
+  _LAT3="$(awk "BEGIN{print ${_CLAT}+0.03}")"; _LON3="$(awk "BEGIN{print ${_CLON}-0.06}")"
+  _LAT4="$(awk "BEGIN{print ${_CLAT}-0.04}")"; _LON4="$(awk "BEGIN{print ${_CLON}+0.04}")"
+  msg_info "Smoke-Test Route um Zentrum ${CENTER_COORDS} (kostet auto)"
+  if curl -fsS "http://127.0.0.1:${VALHALLA_PORT}/route" \
+      -d "{\"locations\":[{\"lat\":${_CLAT},\"lon\":${_CLON}},{\"lat\":${_LAT2},\"lon\":${_LON2}}],\"costing\":\"auto\"}" \
+      | grep -q '"trip"'; then
+    msg_ok "Route-Test OK (Tiles vollständig, auto-Routing geht)"
+  else
+    msg_warn "Route-Test FEHLGESCHLAGEN – meist: Tiles unvollständig (Segfault-Build?) oder Punkte außerhalb Region."
+    msg_warn "Diagnose: docker logs --tail 50 valhalla | grep -iE 'segfault|killed|oom|error|failed'; ./check-route.sh"
+  fi
+  msg_info "Smoke-Test Optimized Route (braucht >=4 Punkte, costing auto|bicycle|pedestrian)"
+  if curl -fsS "http://127.0.0.1:${VALHALLA_PORT}/optimized_route" \
+      -d "{\"locations\":[{\"lat\":${_CLAT},\"lon\":${_CLON}},{\"lat\":${_LAT2},\"lon\":${_LON2}},{\"lat\":${_LAT3},\"lon\":${_LON3}},{\"lat\":${_LAT4},\"lon\":${_LON4}}],\"costing\":\"auto\"}" \
+      | grep -q '"trip"'; then
+    msg_ok "Optimized-Route-Test OK"
+  else
+    msg_warn "Optimized-Route-Test FEHLGESCHLAGEN – Hinweis: braucht mind. 4 Punkte + costing auto/bicycle/pedestrian (kein truck/bus/multimodal)."
+  fi
+  unset _CLAT _CLON _LAT2 _LON2 _LAT3 _LON3 _LAT4 _LON4
+fi
+
+# ---------- 9. Hilfsskripte + MOTD ----------
 cat <<EOF >/opt/valhalla/rebuild.sh
 #!/usr/bin/env bash
 # Tiles neu bauen (z. B. nach PBF-Tausch in custom_files/)
+# Wichtig: gleiche sichere Threads wie beim Erstbuild (${THREADS}, OOM-Schutz).
 cd /opt/valhalla
-docker compose run --rm -e force_rebuild=True -e build_tar=True valhalla || true
+THREADS_FALLBACK="${THREADS}"
+THREADS_FROM_COMPOSE="\$(grep -Eo 'server_threads=[0-9]+' docker-compose.yml 2>/dev/null | grep -Eo '[0-9]+' | head -n1)"
+THREADS="\${SERVER_THREADS:-\${THREADS_FROM_COMPOSE:-\$THREADS_FALLBACK}}"
+docker compose run --rm -e force_rebuild=True -e build_tar=True -e server_threads="\${THREADS:-1}" valhalla || true
 docker compose restart valhalla
 docker logs -f valhalla
 EOF
 chmod +x /opt/valhalla/rebuild.sh
 
+# Diagnose-Skript: unterscheidet "Tiles kaputt" vs "Punkt außerhalb Region" vs "falsches Costing"
+cat <<'DIAG_EOF' >/opt/valhalla/check-route.sh
+#!/usr/bin/env bash
+# Diagnose für "optimale route geht nicht / Fehlermeldungen"
+# Aufruf: ./check-route.sh [lat lon lat lon ...]  (default: um CENTER aus REGION testen)
+set -u
+cd /opt/valhalla || exit 1
+source ./REGION 2>/dev/null || true
+PORT="%%VALHALLA_PORT%%"
+PORT_FROM_COMPOSE="$(grep -Eo '[0-9]+:8002' docker-compose.yml 2>/dev/null | cut -d: -f1 | head -n1)"
+PORT="${PORT_FROM_COMPOSE:-$PORT}"
+CENTER="${CENTER_COORDS:-51.16,10.45}"
+CLAT="${CENTER%%,*}"; CLON="${CENTER##*,}"
+if (( $# >= 4 )); then LAT1="$1"; LON1="$2"; LAT2="$3"; LON2="$4"
+else LAT1="$CLAT"; LON1="$CLON"; LAT2="$(awk "BEGIN{print $CLAT+0.05}")"; LON2="$(awk "BEGIN{print $CLON+0.07}")"; fi
+echo "== 1/4 status =="; curl -s "http://127.0.0.1:${PORT}/status" | head -c 500; echo
+echo "== 2/4 route (auto) ${LAT1},${LON1} -> ${LAT2},${LON2} =="
+curl -s "http://127.0.0.1:${PORT}/route" -d "{\"locations\":[{\"lat\":${LAT1},\"lon\":${LON1}},{\"lat\":${LAT2},\"lon\":${LON2}}],\"costing\":\"auto\"}" | head -c 1000; echo
+echo "== 3/4 optimized_route (4 Punkte, auto) =="
+curl -s "http://127.0.0.1:${PORT}/optimized_route" -d "{\"locations\":[{\"lat\":${LAT1},\"lon\":${LON1}},{\"lat\":${LAT2},\"lon\":${LON2}},{\"lat\":${LAT1},\"lon\":${LON2}},{\"lat\":${LAT2},\"lon\":${LON1}}],\"costing\":\"auto\"}" | head -c 1000; echo
+echo "== 4/4 Build-Log Fehler =="; docker logs --tail 200 valhalla 2>&1 | grep -iE 'segfault|killed|oom|aborted|failed tile|ERROR' | tail -20 || echo "(keine Build-Fehler in den letzten 200 Zeilen)"
+echo; echo "Hinweise:"; echo "- NoSegment/could not snap = Punkt AUSSERHALB der gebauten Region (${CENTER}) oder Tiles unvollständig."; echo "- optimized_route braucht >=4 locations + costing auto|bicycle|pedestrian."; echo "- Segfault/Killed im Log = OOM: Threads senken (server_threads=1), Swap prüfen, siehe README."
+DIAG_EOF
+chmod +x /opt/valhalla/check-route.sh
+# Installzeit-Port in das Diagnose-Skript einbacken (Template nutzt quoted heredoc)
+sed -i "s/%%VALHALLA_PORT%%/${VALHALLA_PORT}/" /opt/valhalla/check-route.sh
+
+_RLAT="${CENTER_COORDS%%,*}"; _RLON="${CENTER_COORDS##*,}"
+_RLAT2="$(awk "BEGIN{print ${_RLAT}+0.05}")"; _RLON2="$(awk "BEGIN{print ${_RLON}+0.07}")"
 cat <<EOF >/opt/valhalla/README.txt
 Valhalla LXC – Kurzanleitung
 ============================
 Web-App : http://${LOCAL_IP}:${WEB_PORT}/
 API     : http://${LOCAL_IP}:${VALHALLA_PORT}/status
-Test    : curl http://${LOCAL_IP}:${VALHALLA_PORT}/status
-Route   : curl -s http://${LOCAL_IP}:${VALHALLA_PORT}/route -d '{"locations":[{"lat":48.14,"lon":11.58},{"lat":48.20,"lon":11.65}],"costing":"auto"}'
+Region  : ${TILE_REGION} (Zentrum ${CENTER_COORDS})
+Route-Test (Punkte IN der Region!):
+  curl -s http://${LOCAL_IP}:${VALHALLA_PORT}/route -d '{"locations":[{"lat":${_RLAT},"lon":${_RLON}},{"lat":${_RLAT2},"lon":${_RLON2}}],"costing":"auto"}'
+Optimized Route: mind. 4 Punkte + costing auto|bicycle|pedestrian (kein truck/bus/multimodal!)
 
 PBF tauschen: neue .pbf nach /opt/valhalla/custom_files/ legen, dann ./rebuild.sh
+Diagnose bei Fehlermeldung: ./check-route.sh   (Tiles-kaputt vs Punkt-ausserhalb vs Costing)
 Logs: docker logs -f valhalla   |   docker logs valhalla-web
 Stack: cd /opt/valhalla && docker compose ps / docker compose up -d
+OOM/Segfault (enhance-Phase): server_threads=${THREADS} + Swap – siehe REGION + docker-compose.yml
 EOF
 
 motd_ssh

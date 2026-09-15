@@ -41,6 +41,11 @@ var_tile_region="${var_tile_region:-}"
 var_tile_urls="${var_tile_urls:-}"
 var_web_port="${var_web_port:-80}"
 var_valhalla_port="${var_valhalla_port:-8002}"
+# Build-/Server-Threads: leer = auto (1 bei germany/dach, sonst 2).
+# Hinweis: server_threads steuert BEIDES: valhalla_build_tiles-Concurrency UND
+# Service-Threads. Germany/dach crasht in der enhance-Phase mit 4 Threads auf
+# 8 GB RAM (Segfault/OOM) – deshalb dort max. 2, empfohlen 1. Mehr nur mit mehr RAM.
+var_server_threads="${var_server_threads:-}"
 
 header_info "$APP"
 variables
@@ -99,7 +104,23 @@ if [[ -z "${var_tile_region:-}" && -z "${var_tile_urls:-}" ]]; then
     var_tile_region="germany"
   fi
 fi
-export var_tile_region var_tile_urls var_web_port var_valhalla_port
+export var_tile_region var_tile_urls var_web_port var_valhalla_port var_server_threads
+
+# --- Ressourcen-Guard: Germany/DACH braucht 8 GB RAM + 50 GB Disk ---
+# Der bekannte enhance-Segfault ist fast immer OOM (4 Threads auf 8 GB).
+# Hier warnen wir FRÜH (Host-Seite), statt nach 2h Bauzeit zu crashen.
+if [[ "${var_tile_region,,}" == *germany* || "${var_tile_region,,}" == *dach* ]]; then
+  if (( var_ram < 8192 )); then
+    msg_warn "Region '${var_tile_region}' + ${var_ram} MB RAM = OOM-Risiko (enhance-Segfault)!"
+    msg_warn "Empfohlen: 8192+ MB RAM und var_server_threads=1. Baue trotzdem mit Threads=1."
+    var_server_threads="${var_server_threads:-1}"
+    export var_server_threads
+  fi
+  if (( var_disk < 50 )); then
+    msg_warn "Region '${var_tile_region}' braucht ~25 GB Tiles + ~4 GB PBF – var_disk=${var_disk} GB ist knapp!"
+    msg_warn "Empfohlen: var_disk=50 oder mehr."
+  fi
+fi
 
 function update_script() {
   header_info
